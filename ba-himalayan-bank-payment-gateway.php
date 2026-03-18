@@ -3,12 +3,12 @@ ob_start();
 /**
  * Plugin Name: BA Himalayan Bank Payment Gateway
  * Description: Himalayan Bank (2C2P PACO) payment gateway for BA Book Everything.
- * Version: 1.0.3
- * Author: Caravan Team
+ * Version: 1.0.4
+ * Author: Surox and Manoj
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: ba-himalayan-bank-payment-gateway
- * Requires PHP: 8.1
+ * Requires PHP: 8.2
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -177,7 +177,6 @@ function ba_hbl_get_settings(): array {
 	$defaults = array(
 		'checkout_title'                => '',
 		'checkout_description'          => '',
-		'currency'                      => 'NPR',
 		'3d_secure'                     => 'yes',
 		// Return / notification URLs (optional overrides).
 		'success_url'                   => '',
@@ -262,7 +261,10 @@ function ba_hbl_order_to_pay( $order_id, $args, $current_url, $success_url, $cus
 	$cancel_url_send  = $cancel_override ?: $confirmation_url;
 	$backend_url_send = $backend_override ?: $backend_url;
 
-	$currency_code = $currency ?: ( class_exists( 'BABE_Currency' ) ? BABE_Currency::get_currency() : $settings['currency'] );
+	// Use BA Book Everything base currency (site-wide currency setting).
+	$currency_code = class_exists( 'BABE_Currency' )
+		? ( BABE_Currency::get_currency() ?: ( $currency ?: 'NPR' ) )
+		: ( $currency ?: 'NPR' );
 	$threeD        = ( $settings['3d_secure'] === 'yes' ) ? 'Y' : 'N';
 
 	$purchase_items = array(
@@ -494,11 +496,6 @@ function ba_hbl_register_settings(): void {
 function ba_hbl_sanitize_settings( $input ): array {
 	$output = array();
 
-	$allowed_currencies = array( 'NPR', 'USD' );
-	$output['currency'] = isset( $input['currency'] ) && in_array( $input['currency'], $allowed_currencies, true )
-		? $input['currency']
-		: 'NPR';
-
 	$text_fields = array(
 		'checkout_title', 'checkout_description',
 		'merchant_id', 'encryption_key', 'access_token',
@@ -565,16 +562,6 @@ function ba_hbl_settings_page(): void {
 
 				<tr><th><label for="ba_hbl_3d"><?php esc_html_e( '3D Secure', 'ba-himalayan-bank-payment-gateway' ); ?></label></th>
 					<td><input type="checkbox" id="ba_hbl_3d" name="<?php echo BA_HBL_OPTION_NAME; ?>[3d_secure]" value="yes" <?php checked( $s['3d_secure'], 'yes' ); ?>></td></tr>
-
-				<tr><th><label for="ba_hbl_currency"><?php esc_html_e( 'Currency', 'ba-himalayan-bank-payment-gateway' ); ?></label></th>
-    <td>
-        <select id="ba_hbl_currency" name="<?php echo BA_HBL_OPTION_NAME; ?>[currency]">
-            <option value="NPR" <?php selected( $s['currency'], 'NPR' ); ?>>NPR – Nepali Rupee</option>
-            <option value="USD" <?php selected( $s['currency'], 'USD' ); ?>>USD – US Dollar</option>
-        </select>
-        <p class="description"><?php esc_html_e( 'Currency used for payments.', 'ba-himalayan-bank-payment-gateway' ); ?></p>
-    </td>
-</tr>
 
 				<tr><th><label for="ba_hbl_title"><?php esc_html_e( 'Checkout Title', 'ba-himalayan-bank-payment-gateway' ); ?></label></th>
 					<td><input type="text" id="ba_hbl_title" name="<?php echo BA_HBL_OPTION_NAME; ?>[checkout_title]" value="<?php echo esc_attr( $s['checkout_title'] ); ?>" class="regular-text"></td></tr>

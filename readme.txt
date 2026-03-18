@@ -1,6 +1,6 @@
 === Nhooja Himalayan Bank Payment Gateway ===
-Contributors: sachit.tandukar
-Tags: payment gateway, himalayan bank, woo-commerce, e-commerce, nepali payment gateway
+Contributors: manojtsx
+Tags: payment gateway, himalayan bank, ba-book-everything, e-commerce, nepali payment gateway
 Requires at least: 6.0
 Tested up to: 6.7.1
 Stable tag: 1.3.0
@@ -8,16 +8,16 @@ Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Integrate Himalayan Bank as a payment gateway in your WooCommerce store for secure transactions.
+Integrate Himalayan Bank as a payment gateway in your BA Book Everything store for secure transactions.
 
 == Description ==
 
-The Nhooja Himalayan Bank Payment Gateway plugin for WooCommerce allows you to accept payments directly on your store via Himalayan Bank's secure payment processing system. Customers can make payments for their orders using their credit or debit cards without leaving your site.
+The Nhooja Himalayan Bank Payment Gateway plugin for BA Book Everything allows you to accept payments directly on your store via Himalayan Bank's secure payment processing system. Customers can make payments for their orders using their credit or debit cards without leaving your site.
 
-This plugin seamlessly integrates with WooCommerce, providing a straightforward setup process and a secure payment solution. It supports 3D Secure for added security and is compatible with WooCommerce's checkout process.
+This plugin seamlessly integrates with BA Book Everything, providing a straightforward setup process and a secure payment solution. It supports 3D Secure for added security and is compatible with BA Book Everything's checkout process.
 
 Features include:
-- Easy integration with WooCommerce.
+- Easy integration with BA Book Everything.
 - Secure payment processing with 3D Secure support.
 - Configuration options for test mode, merchant IDs, and encryption keys.
 - Customizable payment success, failure, and cancellation messages.
@@ -36,7 +36,7 @@ This plugin does not:
 
 1. Upload the plugin files to the `/wp-content/plugins/nexhbp-himalayan-bank-payment-gateway` directory, or install the plugin through the WordPress plugins screen directly.
 2. Activate the plugin through the 'Plugins' screen in WordPress.
-3. Use the WooCommerce->Settings->Payments screen to configure the plugin.
+3. Use the BA Book Everything->Settings->Payments screen to configure the plugin.
 4. Enable the Himalayan Bank Payment Gateway and enter your merchant details and encryption keys as provided by Himalayan Bank.
 
 == Frequently Asked Questions ==
@@ -78,7 +78,7 @@ After generating, provide the public signing and public encryption keys to Himal
 * Fixes bugs with nonce validation.
 
 = 1.1 =
-* Adds support for WooCommerce HPOS (High-performance order storage).
+* Adds support for BA Book Everything HPOS (High-performance order storage).
 * User interface improvements
 * Fixes bugs when payment status is not updated correctly.
 * Fixes issues with payment success redirection from payment gateway.
