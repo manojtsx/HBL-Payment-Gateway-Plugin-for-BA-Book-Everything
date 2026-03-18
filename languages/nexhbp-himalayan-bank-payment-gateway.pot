@@ -1,0 +1,186 @@
+# Copyright (C) 2024 Sachit Tandukar
+# This file is distributed under the GPLv2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: Himalayan Bank Payment Gateway 1.1.2\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/nexhbp-himalayan-bank-payment-gateway\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2024-09-29T12:41:09+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.11.0\n"
+"X-Domain: nexhbp-himalayan-bank-payment-gateway\n"
+
+#. Plugin Name of the plugin
+#: nexhbp-himalayan-bank-payment-gateway.php
+#: nexhbp-himalayan-bank-payment-gateway.php:67
+#: nexhbp-himalayan-bank-payment-gateway.php:109
+msgid "Himalayan Bank Payment Gateway"
+msgstr ""
+
+#. Description of the plugin
+#: nexhbp-himalayan-bank-payment-gateway.php
+msgid "Himalayan Bank custom payment gateway integration for WooCommerce."
+msgstr ""
+
+#. Author of the plugin
+#: nexhbp-himalayan-bank-payment-gateway.php
+msgid "Sachit Tandukar"
+msgstr ""
+
+#. Author URI of the plugin
+#: nexhbp-himalayan-bank-payment-gateway.php
+msgid "https://github.com/sachittandukar"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:68
+msgid "Himalayan Bank payment gateway integration for WooCommerce."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:101
+msgid "General Settings"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:105
+msgid "Title"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:107
+msgid "This controls the title that the user sees during checkout."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:113
+msgid "Currency"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:115
+msgid "Enter your currency. Example: USD, EUR, etc. Please contact Himalayan Bank for supported currencies."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:121
+msgid "Enable/Disable 3D Secure"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:123
+msgid "Enable 3D Secure"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:124
+msgid "Enable 3D Secure for this payment gateway. Turn it off for test mode."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:130
+#: nexhbp-himalayan-bank-payment-gateway.php:132
+msgid "Enable/Disable Test Mode"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:133
+msgid "Turn on to enable test mode for this payment gateway."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:139
+msgid "Encryption Keys (Production Only)"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:143
+msgid "Merchant ID"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:145
+msgid "Enter your merchant ID."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:150
+msgid "Encryption Key"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:152
+msgid "Enter your encryption key."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:157
+msgid "Access Token"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:159
+msgid "Enter your access token."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:164
+msgid "Merchant Signing Private Key"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:166
+msgid "Enter your Merchant Signing Private Key."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:172
+msgid "Merchant Encryption Private Key"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:174
+msgid "Enter your Merchant Encryption Private Key."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:180
+msgid "PACO Signing Public Key"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:182
+msgid "Enter your PACO Signing Public Key."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:187
+msgid "PACO Encryption Public Key"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:189
+msgid "Enter your PACO Encryption Public Key."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:195
+msgid "Messages"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:199
+msgid "Failure Message"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:201
+msgid "Message displayed on payment failure."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:203
+msgid "Oops! Something went wrong with your payment."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:208
+msgid "Cancellation Message"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:210
+msgid "Message displayed when payment is cancelled."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:212
+msgid "Payment cancelled. If you have any questions, please contact us."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:241
+msgid "Awaiting payment confirmation"
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:342
+msgid "Security check failed, please try again."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:361
+msgid "Payment failed. Please try again."
+msgstr ""
+
+#: nexhbp-himalayan-bank-payment-gateway.php:362
+msgid "Payment was cancelled. If this was a mistake, please try again."
+msgstr ""
