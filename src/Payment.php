@@ -339,6 +339,42 @@ class Payment extends ActionRequest
 	}
 
 	/**
+	 * Execute a PACO TransactionStatus inquiry and return decrypted response.
+	 *
+	 * @throws GuzzleException
+	 * @throws \Exception
+	 */
+	public function ExecuteTransactionStatusJose( string $orderNo ): string {
+		// TransactionStatus inquiry is a GET endpoint; it does not use JOSE encryption.
+		// PACO TransactionStatus inquiry is a GET endpoint:
+		// GET /api/2.0/Inquiry/TransactionStatus?orderNo=...
+		$this->console_debug( 'PACO TransactionStatus GET', [ 'orderNo' => $orderNo ] );
+
+		$response = $this->client->get( 'api/1.0/Inquiry/TransactionStatus', [
+			'headers' => [
+				'Accept' => 'application/jose',
+				'CompanyApiKey' => SecurityData::get_access_token(),
+				'Content-Type'  => 'application/jose; charset=utf-8',
+			],
+			'query' => array(
+				'orderNo' => $orderNo,
+			),
+			'timeout' => 60,
+			'redirection' => 5,
+			'blocking' => true,
+			'http_version' => '1.0',
+		] );
+
+		$rawResponse             = (string) $response->getBody();
+		$this->lastRawResponse  = $rawResponse;
+		$this->console_debug( 'PACO TransactionStatus raw (json)', [
+			'rawResponse' => $rawResponse,
+		] );
+
+		return $rawResponse;
+	}
+
+	/**
 	 * Execute a PACO refund and return decrypted response.
 	 *
 	 * @throws GuzzleException|\Exception
