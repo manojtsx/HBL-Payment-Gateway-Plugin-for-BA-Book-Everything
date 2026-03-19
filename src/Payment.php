@@ -51,7 +51,7 @@ class Payment extends ActionRequest
 		];
 
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-		// echo '<script>console.log(' . \wp_json_encode($entry) . ');</script>';
+		echo '<script>console.log(' . \wp_json_encode($entry) . ');</script>';
 	}
 
 	private function looks_like_compact_jwe(string $maybeToken): bool
@@ -156,8 +156,6 @@ class Payment extends ActionRequest
 		$stringPayload = \wp_json_encode($payload);
 		$this->lastRequestPayload = $stringPayload;
 		$this->log_debug('PACO Request Payload', ['payload' => $payload]);
-		$this->console_debug('PACO Request Payload', $payload);
-		$this->console_debug('PACO Request Full URL', (string) ($this->client->getConfig('base_uri') . 'api/1.0/Payment/prePaymentUi'));
 		$signingKey    = $this->GetPrivateKey(SecurityData::get_merchant_signing_private_key());
 		$encryptingKey = $this->GetPublicKey(SecurityData::get_paco_encryption_public_key());
 		$this->log_debug('PACO Signing Key', ['key' => $signingKey]);
@@ -185,19 +183,11 @@ class Payment extends ActionRequest
 				'status' => $response->getStatusCode(),
 				'raw'    => $rawResponse,
 			]);
-			$this->console_debug('PACO Response', [
-				'status' => $response->getStatusCode(),
-				'raw'    => $rawResponse,
-			]);
 		} catch (\GuzzleHttp\Exception\ClientException $e) {
 			$errBody = $e->getResponse() ? (string) $e->getResponse()->getBody() : $e->getMessage();
 			$this->lastRawResponse = $errBody;
 
 			$this->log_debug('PACO Client Error (raw)', [
-				'status' => $e->getResponse() ? $e->getResponse()->getStatusCode() : null,
-				'raw'    => $errBody,
-			]);
-			$this->console_debug('PACO Client Error (raw)', [
 				'status' => $e->getResponse() ? $e->getResponse()->getStatusCode() : null,
 				'raw'    => $errBody,
 			]);
@@ -214,9 +204,6 @@ class Payment extends ActionRequest
 
 					$decoded = \json_decode($decryptedForException, true);
 					$this->log_debug('PACO Client Error (decrypted)', [
-						'decrypted' => $decoded ?? $decryptedForException,
-					]);
-					$this->console_debug('PACO Client Error (decrypted)', [
 						'decrypted' => $decoded ?? $decryptedForException,
 					]);
 				} catch (\Throwable $decryptErr) {
@@ -239,7 +226,6 @@ class Payment extends ActionRequest
 		$decrypted = $this->DecryptToken($token, $decryptingKey, $signatureVerificationKey);
 		$decoded   = \json_decode($decrypted, true);
 		$this->log_debug('PACO Response (decrypted)', ['decrypted' => $decoded ?? $decrypted]);
-		$this->console_debug('PACO Response (decrypted)', ['decrypted' => $decoded ?? $decrypted]);
 
 		return $decrypted;
 	}
@@ -255,6 +241,101 @@ class Payment extends ActionRequest
 		$signatureVerificationKey = $this->GetPublicKey(SecurityData::get_paco_signing_public_key());
 
 		return $this->DecryptToken($token, $decryptingKey, $signatureVerificationKey);
+	}
+
+	/**
+	 * Execute a PACO TransactionList inquiry and return decrypted response.
+	 *
+	 * @throws GuzzleException
+	 * @throws \Exception
+	 */
+	public function ExecuteTransactionList(
+		?string $fromDate = null,
+		?string $toDate = null,
+		?string $orderNo = null,
+		?int $pageNo = null,
+		?int $pageSize = null
+	): string {
+		$now = Carbon::now();
+
+		// PACO TransactionList uses:
+		// - request.apiRequest (required)
+		// - request.advSearchParams (required container)
+		// - fromDate/toDate/orderNo/maxResults are optional fields inside advSearchParams.
+		$maxResults = $pageSize !== null ? (int) $pageSize : 500;
+		$maxResults = max(1, min(500, $maxResults));
+
+		$request = array(
+			'apiRequest' => array(
+				'requestMessageID' => $this->Guid(),
+				'requestDateTime'  => $now->utc()->format('Y-m-d\TH:i:s.v\Z'),
+				'language'         => 'en-US',
+			),
+			'advSearchParams' => array(
+				'officeId'   => [ SecurityData::get_merchant_id() ],
+				'dateOption' => 'CreatedDate',
+				'maxResults' => $maxResults,
+			),
+		);
+
+		// if ($fromDate !== null) {
+		// 	$request['advSearchParams']['fromDate'] = $fromDate;
+		// }
+		// if ($toDate !== null) {
+		// 	$request['advSearchParams']['toDate'] = $toDate;
+		// }
+		// if ($orderNo !== null) {
+		// 	$request['advSearchParams']['orderNo'] = [ $orderNo ];
+		// }
+		
+		$payload = array(
+			'request'       => $request,
+			'iss'           => SecurityData::get_access_token(),
+			'aud'           => 'PacoAudience',
+			'CompanyApiKey' => SecurityData::get_access_token(),
+			'iat'           => $now->unix(),
+			'nbf'           => $now->unix(),
+			'exp'           => $now->copy()->addHour()->unix(),
+		);
+		
+		$stringPayload = \wp_json_encode($payload);
+		$this->console_debug('PACO TransactionList string payload', $stringPayload);
+		$signingKey    = $this->GetPrivateKey(SecurityData::get_merchant_signing_private_key());
+		$encryptingKey = $this->GetPublicKey(SecurityData::get_paco_encryption_public_key());
+		$body          = $this->EncryptPayload($stringPayload, $signingKey, $encryptingKey);
+
+		$response = $this->client->post('api/1.0/Inquiry/TransactionList', array(
+			'headers' => array(
+				'Accept'        => 'application/jose',
+				'CompanyApiKey' => SecurityData::get_access_token(),
+				'Content-Type'  => 'application/jose; charset=utf-8',
+			),
+			'body'    => $body,
+			'timeout' => 60,
+			'redirection' => 5,
+			'blocking' => true,
+			'http_version' => '1.0',
+			'data_format' => 'body',
+		));
+
+		$rawResponse = (string) $response->getBody();
+		$this->lastRawResponse   = $rawResponse;
+		$this->console_debug('PACO TransactionList raw (encrypted)', [
+			'rawResponse' => $rawResponse,
+		]);
+
+		$token                    = $rawResponse;
+		$decryptingKey            = $this->GetPrivateKey(SecurityData::get_merchant_decryption_private_key());
+		$signatureVerificationKey = $this->GetPublicKey(SecurityData::get_paco_signing_public_key());
+
+		$decrypted = $this->DecryptToken($token, $decryptingKey, $signatureVerificationKey);
+		$decoded   = \json_decode($decrypted, true);
+
+		$this->console_debug('PACO TransactionList decrypted', [
+			'decoded' => $decoded ?? $decrypted,
+		]);
+
+		return $decrypted;
 	}
 
 	/**

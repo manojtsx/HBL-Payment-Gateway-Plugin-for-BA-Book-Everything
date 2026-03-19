@@ -158,10 +158,19 @@ function ba_hbl_gateway_init(): void {
 		add_action( 'admin_post_ba_hbl_refund', 'ba_hbl_process_refund' );
 		add_action( 'admin_enqueue_scripts', function ( $hook ) {
 			if ( strpos( $hook, 'ba-hbl-gateway' ) !== false ) {
+				// Some admin pages rely on WP Pointer (jQuery plugin). Ensure it's loaded
+				// to prevent: "TypeError: $(...).pointer is not a function".
+				if ( function_exists( 'wp_enqueue_style' ) ) {
+					wp_enqueue_style( 'wp-pointer' );
+				}
+				if ( function_exists( 'wp_enqueue_script' ) ) {
+					wp_enqueue_script( 'wp-pointer' );
+				}
+
 				wp_enqueue_script(
 					'ba-hbl-admin',
 					BA_HBL_PLUGIN_URL . 'assets/admin.js',
-					array(),
+					array( 'jquery' ),
 					'1.0.0',
 					true
 				);
@@ -635,87 +644,489 @@ function ba_hbl_settings_page(): void {
 	<?php
 }
 
+/**
+ * Pick first non-empty scalar string from an array by trying several key names (PACO uses mixed casing).
+ */
+function ba_hbl_paco_pick_string( $arr, array $keys ): string {
+	if ( ! is_array( $arr ) ) {
+		return '';
+	}
+	foreach ( $keys as $k ) {
+		if ( array_key_exists( $k, $arr ) && $arr[ $k ] !== null && $arr[ $k ] !== '' ) {
+			if ( is_scalar( $arr[ $k ] ) ) {
+				return (string) $arr[ $k ];
+			}
+		}
+	}
+	return '';
+}
+
+/**
+ * Pick first existing child array by trying several parent key names.
+ */
+function ba_hbl_paco_pick_subarray( $arr, array $keys ): ?array {
+	if ( ! is_array( $arr ) ) {
+		return null;
+	}
+	foreach ( $keys as $k ) {
+		if ( isset( $arr[ $k ] ) && is_array( $arr[ $k ] ) ) {
+			return $arr[ $k ];
+		}
+	}
+	return null;
+}
+
+/**
+ * Unwrap row if PACO nests the transaction under transaction/Transaction/item.
+ */
+function ba_hbl_paco_normalize_transaction_row( $txn ): array {
+	if ( ! is_array( $txn ) ) {
+		return [];
+	}
+	foreach ( [ 'transaction', 'Transaction', 'txn', 'Txn', 'item', 'Item', 'record', 'Record' ] as $w ) {
+		if ( isset( $txn[ $w ] ) && is_array( $txn[ $w ] ) ) {
+			return $txn[ $w ];
+		}
+	}
+	return $txn;
+}
+
+/**
+ * Extract transaction list array from decrypted PACO JSON (several response shapes).
+ */
+function ba_hbl_paco_extract_transaction_list( $decoded ): array {
+	if ( ! is_array( $decoded ) ) {
+		return [];
+	}
+	$path_segments = [
+		// Inquiry/TransactionList: transactions are often a direct array under Data (not transactionList).
+		[ 'response', 'Data' ],
+		[ 'Response', 'Data' ],
+		[ 'response', 'data' ],
+		[ 'request', 'Data' ],
+		[ 'request', 'data' ],
+		[ 'response', 'Data', 'transactionList' ],
+		[ 'response', 'data', 'transactionList' ],
+		[ 'Response', 'Data', 'transactionList' ],
+		[ 'request', 'Data', 'transactionList' ],
+		[ 'request', 'data', 'transactionList' ],
+		[ 'data', 'transactionList' ],
+		[ 'Data', 'transactionList' ],
+		[ 'response', 'Data', 'transactions' ],
+		[ 'data', 'transactions' ],
+		[ 'transactionList' ],
+	];
+	foreach ( $path_segments as $path ) {
+		$cur = $decoded;
+		$ok  = true;
+		foreach ( $path as $seg ) {
+			if ( ! is_array( $cur ) || ! array_key_exists( $seg, $cur ) ) {
+				$ok = false;
+				break;
+			}
+			$cur = $cur[ $seg ];
+		}
+		if ( ! $ok || ! is_array( $cur ) ) {
+			continue;
+		}
+		// Sequential list of rows.
+		if ( $cur === [] ) {
+			return [];
+		}
+		$keys = array_keys( $cur );
+		$is_list = ( $keys === range( 0, count( $cur ) - 1 ) );
+		if ( $is_list ) {
+			return $cur;
+		}
+		// Single transaction object returned instead of list.
+		if ( ba_hbl_paco_pick_string( $cur, [ 'orderNo', 'OrderNo', 'invoiceNo', 'InvoiceNo' ] ) !== '' ) {
+			return [ $cur ];
+		}
+	}
+	return [];
+}
+
+/**
+ * Format PACO ISO 8601 transactionDateTime for admin display (site timezone / locale).
+ */
+function ba_hbl_format_paco_transaction_datetime( $iso_string ): string {
+	if ( empty( $iso_string ) || ! is_string( $iso_string ) ) {
+		return '—';
+	}
+	$ts = strtotime( $iso_string );
+	if ( false === $ts ) {
+		return sanitize_text_field( $iso_string );
+	}
+	return wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $ts );
+}
+
+/**
+ * Turn PACO AmountText (fixed digits, implied decimals) into a readable amount string.
+ * Uses DecimalPlaces from transactionAmount when provided (e.g. 2 → last 2 digits are fraction).
+ */
+function ba_hbl_format_paco_amount_text( string $amount_text, ?int $decimal_places = null ): string {
+	$digits = preg_replace( '/\D/', '', $amount_text );
+	if ( $digits === '' || $digits === null ) {
+		return $amount_text !== '' ? $amount_text : '—';
+	}
+	$dp = $decimal_places !== null ? max( 0, min( 8, (int) $decimal_places ) ) : 2;
+	if ( $dp === 0 ) {
+		return number_format( (float) $digits, 0, '.', ',' );
+	}
+	if ( strlen( $digits ) <= $dp ) {
+		$digits = str_pad( $digits, $dp + 1, '0', STR_PAD_LEFT );
+	}
+	$whole = substr( $digits, 0, -$dp );
+	$frac  = substr( $digits, -$dp );
+	$num   = (float) ( $whole . '.' . $frac );
+	return number_format( $num, $dp, '.', ',' );
+}
+
 function ba_hbl_transactions_page(): void {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
 
-	$post_type = class_exists( 'BABE_Post_types' ) && ! empty( BABE_Post_types::$order_post_type )
-		? BABE_Post_types::$order_post_type
-		: 'to_book';
+	$settings = ba_hbl_get_settings();
+	SecurityData::init_from_settings( $settings );
 
-	global $wpdb;
-	$order_ids = $wpdb->get_col( $wpdb->prepare(
-		"SELECT DISTINCT p.ID FROM {$wpdb->posts} p
-		 INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID
-		 WHERE p.post_type = %s AND pm.meta_key = '_payment_method' AND pm.meta_value = %s
-		 ORDER BY p.ID DESC LIMIT 200",
-		$post_type,
-		BA_HBL_PAYMENT_METHOD
-	) );
+	// --- Handle filters from GET params ---
+	$from_date = isset( $_GET['from_date'] ) ? sanitize_text_field( wp_unslash( $_GET['from_date'] ) ) : date( 'Y-m-d', strtotime( '-30 days' ) );
+	$to_date   = isset( $_GET['to_date'] ) ? sanitize_text_field( wp_unslash( $_GET['to_date'] ) ) : date( 'Y-m-d' );
+	$order_no  = isset( $_GET['order_no'] ) ? sanitize_text_field( wp_unslash( $_GET['order_no'] ) ) : '';
+	$page_size = 500;
 
-	$refund_done   = isset( $_GET['refund_done'] ) ? sanitize_text_field( $_GET['refund_done'] ) : '';
-	$refund_error  = isset( $_GET['refund_error'] ) ? sanitize_text_field( $_GET['refund_error'] ) : '';
+	// --- Fetch from PACO ---
+	$transactions = [];
+	$fetch_error  = '';
+	$decoded_response = null;
+
+	try {
+		$payment      = new Payment();
+		$raw          = $payment->ExecuteTransactionList(
+			$from_date . 'T00:00:00Z',
+			$to_date . 'T23:59:59Z',
+			$order_no ?: null,	
+		);
+		$decoded = json_decode( $raw, true );
+		$decoded_response = $decoded;
+
+		$transactions = ba_hbl_paco_extract_transaction_list( $decoded );
+	} catch ( \Exception $e ) {
+		$fetch_error = $e->getMessage();
+	}
+
+	// Filter: show all transactions by default.
+	// Allowed PACO PaymentStatus codes:
+	// - S (Success)
+	// - F (Failed)
+	// - PCPS (Pending)
+	$status_filter = isset( $_GET['payment_status'] ) ? sanitize_text_field( wp_unslash( $_GET['payment_status'] ) ) : 'ALL';
+	$status_filter = strtoupper( $status_filter );
+
+	$allowed_statuses = [ 'ALL', 'S', 'F', 'PCPS' ];
+	if ( ! in_array( $status_filter, $allowed_statuses, true ) ) {
+		$status_filter = 'ALL';
+	}
+
+	$filtered_transactions = [];
+	foreach ( $transactions as $txn ) {
+		if ( ! is_array( $txn ) ) {
+			continue;
+		}
+
+		$t   = ba_hbl_paco_normalize_transaction_row( $txn );
+		$psi = ba_hbl_paco_pick_subarray( $t, [ 'paymentStatusInfo', 'PaymentStatusInfo' ] );
+		$payment_status = strtoupper( ba_hbl_paco_pick_string( $psi ?? [], [ 'PaymentStatus', 'paymentStatus' ] ) );
+
+		if ( $status_filter === 'ALL' ) {
+			$filtered_transactions[] = $txn;
+			continue;
+		}
+
+		if ( $payment_status === $status_filter ) {
+			$filtered_transactions[] = $txn;
+		}
+	}
+	$transactions = $filtered_transactions;
+
+	// Debug: show the whole decoded/filtered transaction list in browser console.
+	if ( \defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+		echo '<script>console.log("PACO TransactionList decoded_response", ' . \wp_json_encode( $decoded_response ) . ');</script>';
+		echo '<script>console.log("PACO TransactionList filtered_transactions", ' . \wp_json_encode( $transactions ) . ');</script>';
+	}
 	?>
 	<div class="wrap">
 		<h1><?php esc_html_e( 'HBL PACO Transactions', 'ba-himalayan-bank-payment-gateway' ); ?></h1>
 
-		<?php if ( $refund_done ) : ?>
-			<div class="notice notice-success"><p><?php echo esc_html( $refund_done ); ?></p></div>
-		<?php endif; ?>
-		<?php if ( $refund_error ) : ?>
-			<div class="notice notice-error"><p><?php echo esc_html( $refund_error ); ?></p></div>
+		<?php if ( $fetch_error ) : ?>
+			<div><p><?php echo esc_html( $fetch_error ); ?></p></div>
 		<?php endif; ?>
 
-		<table class="widefat striped" style="margin-top:16px;">
+		<!-- Filter Form -->
+		<form method="get" action="" style="margin: 16px 0; display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+			<input type="hidden" name="page" value="ba-hbl-gateway-transactions">
+			<label>
+				<?php esc_html_e( 'From', 'ba-himalayan-bank-payment-gateway' ); ?><br>
+				<input type="date" name="from_date" value="<?php echo esc_attr( $from_date ); ?>" class="regular-text">
+			</label>
+			<label>
+				<?php esc_html_e( 'To', 'ba-himalayan-bank-payment-gateway' ); ?><br>
+				<input type="date" name="to_date" value="<?php echo esc_attr( $to_date ); ?>" class="regular-text">
+			</label>
+			<label>
+				<?php esc_html_e( 'Order No', 'ba-himalayan-bank-payment-gateway' ); ?><br>
+				<input type="text" name="order_no" value="<?php echo esc_attr( $order_no ); ?>" class="regular-text" placeholder="Optional">
+			</label>
+			<label>
+				<?php esc_html_e( 'Payment Status', 'ba-himalayan-bank-payment-gateway' ); ?><br>
+				<select name="payment_status" class="regular-text">
+					<option value="ALL" <?php selected( $status_filter, 'ALL' ); ?>>All</option>
+					<option value="S" <?php selected( $status_filter, 'S' ); ?>>Success (S)</option>
+					<option value="F" <?php selected( $status_filter, 'F' ); ?>>Failed (F)</option>
+					<option value="PCPS" <?php selected( $status_filter, 'PCPS' ); ?>>Pending (PCPS)</option>
+				</select>
+			</label>
+			<div>
+				<button type="submit" class="button button-primary"><?php esc_html_e( 'Filter', 'ba-himalayan-bank-payment-gateway' ); ?></button>
+				<a href="<?php echo esc_url( admin_url( 'admin.php?page=ba-hbl-gateway-transactions' ) ); ?>" class="button"><?php esc_html_e( 'Reset', 'ba-himalayan-bank-payment-gateway' ); ?></a>
+			</div>
+		</form>
+
+		<!-- Transactions Table -->
+		<table class="widefat striped" style="margin-top:8px;">
 			<thead>
 				<tr>
-					<th><?php esc_html_e( 'Order', 'ba-himalayan-bank-payment-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Date', 'ba-himalayan-bank-payment-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Amount', 'ba-himalayan-bank-payment-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Transaction ID', 'ba-himalayan-bank-payment-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Status', 'ba-himalayan-bank-payment-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Transaction date & time', 'ba-himalayan-bank-payment-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Order no.', 'ba-himalayan-bank-payment-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Payment status', 'ba-himalayan-bank-payment-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Payment category', 'ba-himalayan-bank-payment-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Payment type', 'ba-himalayan-bank-payment-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Amount (from AmountText)', 'ba-himalayan-bank-payment-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Currency', 'ba-himalayan-bank-payment-gateway' ); ?></th>
 					<th><?php esc_html_e( 'Actions', 'ba-himalayan-bank-payment-gateway' ); ?></th>
 				</tr>
 			</thead>
 			<tbody>
-			<?php if ( empty( $order_ids ) ) : ?>
-				<tr><td colspan="6"><?php esc_html_e( 'No HBL transactions found.', 'ba-himalayan-bank-payment-gateway' ); ?></td></tr>
+			<?php if ( empty( $transactions ) ) : ?>
+				<tr>
+					<td colspan="8">
+						<?php esc_html_e( 'No transactions found for the selected period.', 'ba-himalayan-bank-payment-gateway' ); ?>
+					</td>
+				</tr>
 			<?php else : ?>
-				<?php foreach ( $order_ids as $oid ) :
-					$oid          = absint( $oid );
-					$order_num    = BABE_Order::get_order_number( $oid );
-					$post_obj     = get_post( $oid );
-					$date         = $post_obj ? $post_obj->post_date : '';
-					$amount       = BABE_Order::get_order_total_amount( $oid );
-					$currency     = BABE_Order::get_order_currency( $oid );
-					$txn_id       = get_post_meta( $oid, '_hbl_transaction_id', true );
-					$status       = get_post_status( $oid );
-					$edit_url     = get_edit_post_link( $oid );
-					$refund_url   = wp_nonce_url(
-						admin_url( 'admin-post.php?action=ba_hbl_refund&order_id=' . $oid ),
-						'ba_hbl_refund_' . $oid
+				<?php foreach ( $transactions as $i => $txn ) :
+					$t = ba_hbl_paco_normalize_transaction_row( $txn );
+
+					$ta = ba_hbl_paco_pick_subarray( $t, [ 'transactionAmount', 'TransactionAmount' ] ) ?? [];
+
+					$amount_text_raw = ba_hbl_paco_pick_string( $ta, [ 'AmountText', 'amountText' ] );
+					$currency_code   = ba_hbl_paco_pick_string( $ta, [ 'CurrencyCode', 'currencyCode' ] );
+
+					$decimal_places = null;
+					foreach ( [ 'DecimalPlaces', 'decimalPlaces' ] as $dp_key ) {
+						if ( isset( $ta[ $dp_key ] ) && $ta[ $dp_key ] !== '' && $ta[ $dp_key ] !== null && is_numeric( $ta[ $dp_key ] ) ) {
+							$decimal_places = (int) $ta[ $dp_key ];
+							break;
+						}
+					}
+
+					$amount_num = null;
+					foreach ( [ 'Amount', 'amount' ] as $ak ) {
+						if ( isset( $ta[ $ak ] ) && is_numeric( $ta[ $ak ] ) ) {
+							$amount_num = (float) $ta[ $ak ];
+							break;
+						}
+					}
+
+					$txn_order_no = ba_hbl_paco_pick_string( $t, [ 'orderNo', 'OrderNo', 'invoiceNo', 'InvoiceNo' ] );
+					if ( $txn_order_no === '' ) {
+						$txn_order_no = '—';
+					}
+
+					$txn_iso = ba_hbl_paco_pick_string(
+						$t,
+						[ 'transactionDateTime', 'TransactionDateTime', 'transactionDate', 'TransactionDate' ]
 					);
+					$txn_datetime_display = ba_hbl_format_paco_transaction_datetime( $txn_iso );
+
+					$psi = ba_hbl_paco_pick_subarray( $t, [ 'paymentStatusInfo', 'PaymentStatusInfo' ] );
+					$txn_payment_status_raw = strtoupper( ba_hbl_paco_pick_string( $psi ?? [], [ 'PaymentStatus', 'paymentStatus' ] ) );
+
+					$psp = ba_hbl_paco_pick_subarray( $t, [ 'pspResponse', 'PspResponse' ] );
+					$txn_acquirer_code = ba_hbl_paco_pick_string( $psp ?? [], [ 'acquirerResponseCode', 'AcquirerResponseCode' ] );
+					if ( $txn_acquirer_code === '' ) {
+						$txn_acquirer_code = ba_hbl_paco_pick_string( $t, [ 'acquirerResponseCode', 'AcquirerResponseCode' ] );
+					}
+
+					$txn_resp_code = $txn_acquirer_code !== '' ? $txn_acquirer_code : $txn_payment_status_raw;
+
+					// Map PACO PaymentStatus to label+color (same keys as modal / API).
+					$payment_status = ba_hbl_paco_pick_string( $psi ?? [], [ 'PaymentStatus', 'paymentStatus' ] );
+					if ( $payment_status === '' ) {
+						$payment_status = $txn_resp_code !== '' ? $txn_resp_code : '—';
+					}
+
+					switch ( strtoupper( (string) $payment_status ) ) {
+						case 'S':
+							$status_color = 'green';
+							$status_label = 'Success';
+							break;
+						case 'F':
+							$status_color = 'red';
+							$status_label = 'Failed';
+							break;
+						case 'PCPS':
+							$status_color = 'orange';
+							$status_label = 'Pending';
+							break;
+						default:
+							$status_color = 'gray';
+							$status_label = (string) $payment_status;
+							break;
+					}
+
+					$payment_category = ba_hbl_paco_pick_string( $t, [ 'paymentCategory', 'PaymentCategory' ] );
+					if ( $payment_category === '' ) {
+						$payment_category = '—';
+					}
+					$payment_type = ba_hbl_paco_pick_string(
+						$t,
+						[ 'paymentType', 'PaymentType', 'channelCode', 'ChannelCode' ]
+					);
+					if ( $payment_type === '' ) {
+						$payment_type = '—';
+					}
+
+					if ( $amount_text_raw !== '' ) {
+						$amount_display = ba_hbl_format_paco_amount_text( $amount_text_raw, $decimal_places );
+						if ( $amount_display !== '—' ) {
+							$amount_display .= ' <span class="description" style="font-weight:normal;">(' . esc_html( $amount_text_raw ) . ')</span>';
+						}
+					} elseif ( $amount_num !== null ) {
+						$dp_fmt = $decimal_places !== null ? max( 0, min( 8, (int) $decimal_places ) ) : 2;
+						$amount_display = number_format( $amount_num, $dp_fmt, '.', ',' );
+					} else {
+						$amount_display = '—';
+					}
+
+					$modal_json = esc_attr( wp_json_encode( $txn ) );
 					?>
 					<tr>
-						<td><a href="<?php echo esc_url( $edit_url ); ?>">#<?php echo esc_html( $order_num ); ?></a></td>
-						<td><?php echo esc_html( $date ); ?></td>
-						<td><?php echo esc_html( number_format( $amount, 2 ) . ' ' . $currency ); ?></td>
-						<td><?php echo esc_html( $txn_id ?: '—' ); ?></td>
-						<td><?php echo esc_html( $status ); ?></td>
 						<td>
-							<a href="<?php echo esc_url( $edit_url ); ?>" class="button button-small"><?php esc_html_e( 'View', 'ba-himalayan-bank-payment-gateway' ); ?></a>
-							<?php if ( $txn_id ) : ?>
-								<a href="<?php echo esc_url( $refund_url ); ?>" class="button button-small"
-									onclick="return confirm('<?php echo esc_js( __( 'Refund this order?', 'ba-himalayan-bank-payment-gateway' ) ); ?>');"
-								><?php esc_html_e( 'Refund', 'ba-himalayan-bank-payment-gateway' ); ?></a>
+							<?php if ( $txn_iso !== '' ) : ?>
+								<time datetime="<?php echo esc_attr( $txn_iso ); ?>"><?php echo esc_html( $txn_datetime_display ); ?></time>
+							<?php else : ?>
+								<?php echo esc_html( $txn_datetime_display ); ?>
 							<?php endif; ?>
+						</td>
+						<td><strong><?php echo esc_html( $txn_order_no ); ?></strong></td>
+						<td>
+							<span style="color:<?php echo esc_attr( $status_color ); ?>; font-weight:600;">
+								<?php echo esc_html( $status_label ); ?>
+							</span>
+							<?php if ( $txn_payment_status_raw !== '' && $txn_payment_status_raw !== '—' ) : ?>
+								<br><code class="description" style="font-size:11px;"><?php echo esc_html( $txn_payment_status_raw ); ?></code>
+							<?php endif; ?>
+						</td>
+						<td><code><?php echo esc_html( $payment_category ); ?></code></td>
+						<td><code><?php echo esc_html( $payment_type ); ?></code></td>
+						<td><?php echo wp_kses_post( $amount_display ); ?></td>
+						<td><strong><?php echo esc_html( $currency_code !== '' ? $currency_code : '—' ); ?></strong></td>
+						<td>
+							<button
+								class="button button-small ba-hbl-view-txn"
+								data-txn="<?php echo $modal_json; ?>"
+							><?php esc_html_e( 'View', 'ba-himalayan-bank-payment-gateway' ); ?></button>
 						</td>
 					</tr>
 				<?php endforeach; ?>
 			<?php endif; ?>
 			</tbody>
 		</table>
+
+		<!-- PACO TransactionList paging -->
+		<p style="margin-top:12px;">
+			<?php
+			// Show filtered list size (after filtering by PaymentStatus).
+			echo esc_html( (string) \count( $transactions ) );
+			?>
+			<?php esc_html_e( ' transaction(s) shown (PACO maxResults based).', 'ba-himalayan-bank-payment-gateway' ); ?>
+		</p>
+
+		<!-- View Modal -->
+		<div id="ba-hbl-txn-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+			background:rgba(0,0,0,0.6); z-index:99999; overflow:auto;">
+			<div style="background:#fff; margin:40px auto; padding:24px; max-width:700px;
+				border-radius:6px; position:relative; max-height:80vh; overflow-y:auto;">
+				<button id="ba-hbl-modal-close" style="position:absolute; top:12px; right:12px;
+					font-size:20px; background:none; border:none; cursor:pointer;">✕</button>
+				<h2 style="margin-top:0;"><?php esc_html_e( 'Transaction Details', 'ba-himalayan-bank-payment-gateway' ); ?></h2>
+				<table class="widefat striped" id="ba-hbl-modal-table">
+					<tbody></tbody>
+				</table>
+			</div>
+		</div>
+
+		<!-- Inline JS for modal -->
+		<script>
+		(function() {
+			var modal      = document.getElementById('ba-hbl-txn-modal');
+			var closeBtn   = document.getElementById('ba-hbl-modal-close');
+			var modalTable = document.getElementById('ba-hbl-modal-table').querySelector('tbody');
+
+			document.querySelectorAll('.ba-hbl-view-txn').forEach(function(btn) {
+				btn.addEventListener('click', function() {
+					var txn = JSON.parse(this.getAttribute('data-txn'));
+					console.log('PACO Transaction clicked', txn);
+					modalTable.innerHTML = '';
+					renderObject(txn, modalTable, '');
+					modal.style.display = 'block';
+				});
+			});
+
+			closeBtn.addEventListener('click', function() {
+				modal.style.display = 'none';
+			});
+
+			modal.addEventListener('click', function(e) {
+				if (e.target === modal) modal.style.display = 'none';
+			});
+
+			// Recursively renders nested object as table rows
+			function renderObject(obj, tbody, prefix) {
+				Object.keys(obj).forEach(function(key) {
+					var fullKey = prefix ? prefix + '.' + key : key;
+					var val = obj[key];
+					if (val === null || val === undefined) val = '—';
+
+					if (typeof val === 'object' && !Array.isArray(val)) {
+						// Nested object: add a sub-header row then recurse
+						var headerRow = document.createElement('tr');
+						headerRow.innerHTML = '<td colspan="2" style="background:#f0f0f0; font-weight:700; padding:6px 10px;">' + escHtml(fullKey) + '</td>';
+						tbody.appendChild(headerRow);
+						renderObject(val, tbody, fullKey);
+					} else if (Array.isArray(val)) {
+						var arrRow = document.createElement('tr');
+						arrRow.innerHTML = '<td style="font-weight:600;">' + escHtml(fullKey) + '</td><td>' + escHtml(JSON.stringify(val)) + '</td>';
+						tbody.appendChild(arrRow);
+					} else {
+						var row = document.createElement('tr');
+						row.innerHTML = '<td style="font-weight:600; width:40%;">' + escHtml(fullKey) + '</td><td>' + escHtml(String(val)) + '</td>';
+						tbody.appendChild(row);
+					}
+				});
+			}
+
+			function escHtml(str) {
+				return String(str)
+					.replace(/&/g, '&amp;')
+					.replace(/</g, '&lt;')
+					.replace(/>/g, '&gt;')
+					.replace(/"/g, '&quot;');
+			}
+		})();
+		</script>
 	</div>
 	<?php
 }
