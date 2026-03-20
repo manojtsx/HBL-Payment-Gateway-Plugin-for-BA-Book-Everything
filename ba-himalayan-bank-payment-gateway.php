@@ -3,12 +3,12 @@ ob_start();
 /**
  * Plugin Name: BA Himalayan Bank Payment Gateway
  * Description: Himalayan Bank (2C2P PACO) payment gateway for BA Book Everything.
- * Version: 1.0.4
+ * Version: 1.0.5
  * Author: Surox and Manoj
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: ba-himalayan-bank-payment-gateway
- * Requires PHP: 8.2
+ * Requires PHP: 8.1
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -565,7 +565,6 @@ function ba_hbl_sanitize_settings( $input ): array {
 	}
 
 	$textarea_fields = array(
-		'merchant_sign_private_key', 'merchant_decrypt_private_key',
 		'merchant_sign_public_key', 'merchant_encrypt_public_key',
 	);
 	foreach ( $textarea_fields as $f ) {
@@ -597,8 +596,6 @@ function ba_hbl_settings_page(): void {
 					<tr><td>Token from bank</td><td>Access Token</td></tr>
 					<tr><td>Mid from bank</td><td>Merchant ID</td></tr>
 					<tr><td>Encryption Key ID</td><td>Encryption Key (kid)</td></tr>
-					<tr><td>Private Signing Key (PEM body)</td><td>Merchant Signing Private Key</td></tr>
-					<tr><td>Private Encryption Key (PEM body)</td><td>Merchant Encryption Private Key</td></tr>
 					<tr><td>Merchant Signing Public Key (PEM body)</td><td>Merchant Signing Public Key</td></tr>
 					<tr><td>Merchant Encryption Public Key (PEM body)</td><td>Merchant Encryption Public Key</td></tr>
 				</tbody>
@@ -662,16 +659,9 @@ function ba_hbl_settings_page(): void {
 
 				<tr><th colspan="2"><h3><?php esc_html_e( 'Merchant Keys', 'ba-himalayan-bank-payment-gateway' ); ?></h3></th></tr>
 
-				<tr><th><label for="ba_hbl_signkey"><?php esc_html_e( 'Merchant Signing Private Key', 'ba-himalayan-bank-payment-gateway' ); ?></label></th>
-					<td><textarea id="ba_hbl_signkey" name="<?php echo BA_HBL_OPTION_NAME; ?>[merchant_sign_private_key]" rows="4" class="large-text code"><?php echo esc_textarea( $s['merchant_sign_private_key'] ); ?></textarea>
-						<p class="description"><?php esc_html_e( 'PEM body only (without BEGIN/END headers)', 'ba-himalayan-bank-payment-gateway' ); ?></p></td></tr>
-
 				<tr><th><label for="ba_hbl_signpub"><?php esc_html_e( 'Merchant Signing Public Key', 'ba-himalayan-bank-payment-gateway' ); ?></label></th>
 					<td><textarea id="ba_hbl_signpub" name="<?php echo BA_HBL_OPTION_NAME; ?>[merchant_sign_public_key]" rows="4" class="large-text code"><?php echo esc_textarea( $s['merchant_sign_public_key'] ); ?></textarea>
 						<p class="description"><?php esc_html_e( 'Public key you provide to PACO for verifying your request signature (PEM body only).', 'ba-himalayan-bank-payment-gateway' ); ?></p></td></tr>
-
-				<tr><th><label for="ba_hbl_decryptkey"><?php esc_html_e( 'Merchant Encryption Private Key', 'ba-himalayan-bank-payment-gateway' ); ?></label></th>
-					<td><textarea id="ba_hbl_decryptkey" name="<?php echo BA_HBL_OPTION_NAME; ?>[merchant_decrypt_private_key]" rows="4" class="large-text code"><?php echo esc_textarea( $s['merchant_decrypt_private_key'] ); ?></textarea></td></tr>
 
 				<tr><th><label for="ba_hbl_encpub"><?php esc_html_e( 'Merchant Encryption Public Key', 'ba-himalayan-bank-payment-gateway' ); ?></label></th>
 					<td><textarea id="ba_hbl_encpub" name="<?php echo BA_HBL_OPTION_NAME; ?>[merchant_encrypt_public_key]" rows="4" class="large-text code"><?php echo esc_textarea( $s['merchant_encrypt_public_key'] ); ?></textarea>
