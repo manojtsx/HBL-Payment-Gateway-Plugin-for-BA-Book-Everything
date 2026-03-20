@@ -426,19 +426,67 @@ function ba_hbl_handle_ipn(): void {
 
 	if ( isset( $data['request'] ) ) {
 		$req            = $data['request'];
-		$order_no       = $req['orderNo'] ?? ( $req['invoiceNo'] ?? '' );
-		$transaction_id = $req['controllerInternalId'] ?? ( $req['tranRef'] ?? '' );
-		$resp_code      = $req['respCode'] ?? '';
-		if ( isset( $req['transactionAmount']['amount'] ) ) {
-			$amount = (float) $req['transactionAmount']['amount'];
-		} elseif ( isset( $req['amount'] ) ) {
-			$amount = (float) $req['amount'];
+		// PACO/JWE payload keys may arrive in mixed casing (camelCase/PascalCase).
+		$order_no       = ba_hbl_paco_pick_string( $req, [ 'orderNo', 'OrderNo', 'invoiceNo', 'InvoiceNo' ] );
+		$transaction_id = ba_hbl_paco_pick_string(
+			$req,
+			[
+				'controllerInternalId',
+				'ControllerInternalId',
+				'controllerInternalID',
+				'ControllerInternalID',
+				'tranRef',
+				'TranRef',
+			]
+		);
+		$resp_code = ba_hbl_paco_pick_string(
+			$req,
+			[
+				'respCode',
+				'RespCode',
+				'responseCode',
+				'ResponseCode',
+				'acquirerResponseCode',
+				'AcquirerResponseCode',
+			]
+		);
+
+		// Amount parsing:
+		// - Prefer numeric `Amount`
+		// - Fallback to `AmountText` + `DecimalPlaces` conversion
+		$ta = ba_hbl_paco_pick_subarray( $req, [ 'transactionAmount', 'TransactionAmount' ] );
+		if ( is_array( $ta ) ) {
+			$amount_raw = ba_hbl_paco_pick_string( $ta, [ 'Amount', 'amount' ] );
+			if ( $amount_raw !== '' && is_numeric( $amount_raw ) ) {
+				$amount = (float) $amount_raw;
+			} elseif ( isset( $ta['AmountText'] ) || isset( $ta['amountText'] ) ) {
+				$amount_text_raw = ba_hbl_paco_pick_string( $ta, [ 'AmountText', 'amountText' ] );
+				$dp_raw           = ba_hbl_paco_pick_string( $ta, [ 'DecimalPlaces', 'decimalPlaces' ] );
+				$dp               = ( $dp_raw !== '' && is_numeric( $dp_raw ) ) ? (int) $dp_raw : 2;
+				$digits          = preg_replace( '/\D/', '', (string) $amount_text_raw );
+				if ( $digits !== '' ) {
+					if ( strlen( $digits ) <= $dp ) {
+						$digits = str_pad( $digits, $dp + 1, '0', STR_PAD_LEFT );
+					}
+					$whole = substr( $digits, 0, -$dp );
+					$frac  = substr( $digits, -$dp );
+					$amount = (float) ( $whole . '.' . $frac );
+				}
+			}
+		} else {
+			$amount_raw = ba_hbl_paco_pick_string( $req, [ 'amount', 'Amount' ] );
+			if ( $amount_raw !== '' && is_numeric( $amount_raw ) ) {
+				$amount = (float) $amount_raw;
+			}
 		}
 	} elseif ( isset( $data['orderNo'] ) ) {
-		$order_no       = $data['orderNo'];
-		$transaction_id = $data['controllerInternalId'] ?? ( $data['tranRef'] ?? '' );
-		$resp_code      = $data['respCode'] ?? '';
-		$amount         = isset( $data['amount'] ) ? (float) $data['amount'] : 0;
+		$order_no       = ba_hbl_paco_pick_string( $data, [ 'orderNo', 'OrderNo', 'invoiceNo', 'InvoiceNo' ] );
+		$transaction_id = ba_hbl_paco_pick_string( $data, [ 'controllerInternalId', 'ControllerInternalId', 'tranRef', 'TranRef' ] );
+		$resp_code      = ba_hbl_paco_pick_string( $data, [ 'respCode', 'RespCode', 'responseCode', 'ResponseCode' ] );
+		$amount_raw     = ba_hbl_paco_pick_string( $data, [ 'amount', 'Amount' ] );
+		if ( $amount_raw !== '' && is_numeric( $amount_raw ) ) {
+			$amount = (float) $amount_raw;
+		}
 	}
 
 	if ( empty( $order_no ) ) {
@@ -452,7 +500,19 @@ function ba_hbl_handle_ipn(): void {
 		exit( 'Order not found.' );
 	}
 
-	$is_success = ( $resp_code === '00' || $resp_code === '0000' || $resp_code === '' );
+	// Fallback: sometimes respCode isn't inside request; try apiResponse.responseCode.
+	if ( $resp_code === '' && isset( $data['apiResponse'] ) && is_array( $data['apiResponse'] ) ) {
+		$resp_code = ba_hbl_paco_pick_string( $data['apiResponse'], [ 'responseCode', 'ResponseCode' ] );
+	}
+
+	// PACO success marker for TransactionStatus/Inquiry is typically PC-B050000.
+	$success_codes = [ '00', '0000', 'PC-B050000' ];
+	$is_success = in_array( (string) $resp_code, $success_codes, true ) || $resp_code === '';
+
+	// Some callbacks do not include amount; fallback to BA order total.
+	if ( $is_success && $amount <= 0 ) {
+		$amount = (float) BABE_Order::get_order_total_amount( $order_id );
+	}
 
 	if ( $is_success && $amount > 0 ) {
 		$currency = BABE_Order::get_order_currency( $order_id );
