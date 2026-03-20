@@ -34,6 +34,11 @@ class Payment extends ActionRequest
 		if (!$this->is_debug_enabled()) {
 			return;
 		}
+		// During wp-admin AJAX calls we must not echo <script> tags, otherwise the AJAX
+		// JSON response becomes invalid and the UI shows raw debug output.
+		if (defined('DOING_AJAX') && DOING_AJAX) {
+			return;
+		}
 		if (!\function_exists('is_user_logged_in') || !\is_user_logged_in()) {
 			return;
 		}
@@ -345,28 +350,42 @@ class Payment extends ActionRequest
 	 * @throws \Exception
 	 */
 	public function ExecuteTransactionStatusJose( string $orderNo ): string {
-		// TransactionStatus inquiry is a GET endpoint; it does not use JOSE encryption.
-		// PACO TransactionStatus inquiry is a GET endpoint:
-		// GET /api/2.0/Inquiry/TransactionStatus?orderNo=...
-		$this->console_debug( 'PACO TransactionStatus GET', [ 'orderNo' => $orderNo ] );
+		$this->console_debug( 'PACO TransactionStatus GET', $orderNo );
 
-		$response = $this->client->get( 'api/1.0/Inquiry/TransactionStatus', [
-			'headers' => [
-				'Accept' => 'application/jose',
-				'CompanyApiKey' => SecurityData::get_access_token(),
-				'Content-Type'  => 'application/jose; charset=utf-8',
-			],
-			'query' => array(
-				'orderNo' => $orderNo,
-			),
-			'timeout' => 60,
-			'redirection' => 5,
-			'blocking' => true,
-			'http_version' => '1.0',
-		] );
+		try {
+			$response = $this->client->get( 'api/1.0/Inquiry/TransactionStatus', array(
+				'headers' => array(
+					'accept'         => 'application/json',
+					'apiKey'         => SecurityData::get_access_token(),
+					'content-type'   => 'application/json',
+				),
+				'query' => array(
+					'orderNo' => $orderNo,
+				),
+			) );
 
-		$rawResponse             = (string) $response->getBody();
-		$this->lastRawResponse  = $rawResponse;
+			$rawResponse = (string) $response->getBody();
+		} catch ( \GuzzleHttp\Exception\RequestException $e ) {
+			// PACO may return useful JSON (responseDescription) even for 4xx.
+			if ( $e->hasResponse() ) {
+				$rawResponse = (string) $e->getResponse()->getBody();
+				$this->lastRawResponse = $rawResponse;
+
+				$this->console_debug(
+					'PACO TransactionStatus error response',
+					[
+						'status'      => $e->getResponse()->getStatusCode(),
+						'rawResponse' => $rawResponse,
+					]
+				);
+
+				return $rawResponse;
+			}
+
+			throw $e;
+		}
+
+		$this->lastRawResponse = $rawResponse;
 		$this->console_debug( 'PACO TransactionStatus raw (json)', [
 			'rawResponse' => $rawResponse,
 		] );

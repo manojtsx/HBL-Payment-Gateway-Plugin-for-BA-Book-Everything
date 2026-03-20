@@ -1271,8 +1271,46 @@ function ba_hbl_ajax_get_transaction_status(): void {
 			break;
 	}
 
+	$decoded_arr = is_array( $decoded ) ? $decoded : [];
+
+	$api_response_code = ba_hbl_paco_pick_string(
+		$decoded_arr['apiResponse'] ?? [],
+		[ 'responseCode', 'ResponseCode' ]
+	);
+	$api_response_description = ba_hbl_paco_pick_string(
+		$decoded_arr['apiResponse'] ?? [],
+		[ 'responseDescription', 'ResponseDescription' ]
+	);
+
+	$prior_details = ba_hbl_paco_pick_subarray(
+		$data_item,
+		[ 'priorPaymentResponseDetails', 'PriorPaymentResponseDetails' ]
+	) ?? [];
+
+	// PACO sends the most user-friendly message under priorPaymentResponseDetails.responseDescription.
+	$status_message = ba_hbl_paco_pick_string(
+		$prior_details,
+		[ 'responseDescription', 'ResponseDescription' ]
+	);
+	if ( $status_message === '' ) {
+		$status_message = $api_response_description;
+	}
+
+	// If orderNo is invalid, PACO may return only apiResponse.* with no data[].
+	if ( $status_message === '' && $api_response_description !== '' ) {
+		$status_message = $api_response_description;
+	}
+
+	// Let the metabox show the real PACO message when we don't have a meaningful status code.
+	if ( $status_message !== '' && ( $payment_status_label === '—' || $payment_status_code === '' ) ) {
+		$payment_status_label = $status_message;
+	}
+
 	wp_send_json_success(
 		[
+			'api_response_code'        => $api_response_code,
+			'api_response_description' => $api_response_description,
+			'status_message'          => $status_message,
 			'payment_status_code'  => $payment_status_code,
 			'payment_status_label' => $payment_status_label,
 			'payment_expiry'        => $expiry,
@@ -1443,11 +1481,11 @@ function ba_hbl_txn_status_metabox( \WP_Post $post ): void {
 				var data = res.data || {};
 				var html = "";
 
-				if (data.payment_status_label) {
-					html += "<div><strong>Latest status:</strong> " + escHtml(data.payment_status_label) + "</div>";
-				}
-				if (data.payment_expiry) {
-					html += "<div><strong>Expiry:</strong> " + escHtml(data.payment_expiry) + "</div>";
+				// Requirement: show only PACO responseDescription message.
+				if (data.status_message) {
+					html = "<div style=\\"margin-top:8px;\\">" + escHtml(data.status_message) + "</div>";
+				} else if (data.payment_status_label) {
+					html = "<div style=\\"margin-top:8px;\\"><strong>" + escHtml(data.payment_status_label) + "</strong></div>";
 				}
 
 				el.innerHTML = html || "";
